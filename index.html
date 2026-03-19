@@ -253,7 +253,7 @@
 
         const customerDescs = {
             'yingdezhi': '英德知：上传 txt 文件，每行一个链接，自动添加后缀 &pid=1&uid=1&p1=1，输出 Excel',
-            'ipsos': '益普索：上传 Excel 文件，提取 link 列并重命名为 url，自动添加后缀 &pid=1&uid=1&p1=1'
+            'ipsos': '益普索：上传 Excel 文件，提取 link 列并重命名为 url'
         };
 
         customerSelect.addEventListener('change', (e) => {
@@ -469,7 +469,6 @@
 
         async function processIpsos() {
             const totalRows = originalExcelData.length;
-            let totalUrls = 0;
             processedData = [];
 
             const headers = originalExcelData[0];
@@ -495,23 +494,7 @@
                 const batchProcessed = batchRows.map((row) => {
                     const linkValue = row[linkColIndex] || '';
                     const linkStr = linkValue.toString().trim();
-                    let modifiedLink = linkStr;
-
-                    if (linkStr) {
-                        const localUrlCount = (linkStr.match(urlRegex) || []).length;
-                        if (localUrlCount > 0) {
-                            totalUrls += localUrlCount;
-                            modifiedLink = linkStr.replace(urlRegex, (url) => {
-                                if (url.includes('?')) {
-                                    return url + suffix;
-                                } else {
-                                    return url + '?' + suffix.substring(1);
-                                }
-                            });
-                        }
-                    }
-
-                    return [modifiedLink];
+                    return [linkStr];
                 });
 
                 processedData.push(...batchProcessed);
@@ -529,7 +512,7 @@
             progressText.textContent = '处理完成！';
 
             const linkCount = dataRows.filter(row => row[linkColIndex]).length;
-            statsText.textContent = `✅ 益普索处理完成！共 ${linkCount} 行链接，已添加后缀 &pid=1&uid=1&p1=1`;
+            statsText.textContent = `✅ 益普索处理完成！共 ${linkCount} 行链接已提取`;
             stats.style.display = 'block';
         }
 
