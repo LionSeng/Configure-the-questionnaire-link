@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>链接后缀批量添加工具</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+
+        .upload-section {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+
+        .upload-section:hover {
+            border-color: #4CAF50;
+        }
+
+        .upload-section input[type="file"] {
+            display: none;
+        }
+
+        .upload-label {
+            font-size: 16px;
+            color: #666;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background 0.3s;
+        }
+
+        .btn:hover {
+            background: #45a049;
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #4CAF50;
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+        }
+
+        .progress-text {
+            margin-top: 10px;
+            text-align: center;
+            color: #666;
+        }
+
+        .preview {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .preview h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .preview pre {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .stats {
+            margin-top: 15px;
+            padding: 10px;
+            background: #e8f5e9;
+            border-radius: 4px;
+            color: #2e7d32;
+            display: none;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>链接后缀批量添加工具</h1>
+
+        <div class="upload-section" id="uploadSection">
+            <input type="file" id="fileInput" accept=".txt">
+            <div class="upload-label">
+                <p>📁 点击或拖拽文本文件到此处上传</p>
+                <p style="font-size: 12px; color: #999; margin-top: 10px;">支持 .txt 格式，每行一个链接</p>
+            </div>
+        </div>
+
+        <div id="controls" class="hidden">
+            <button class="btn" id="processBtn">处理文件</button>
+            <button class="btn" id="downloadBtn" disabled>下载 Excel</button>
+        </div>
+
+        <div id="progressContainer" class="progress-container">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <div class="progress-text" id="progressText">准备中...</div>
+        </div>
+
+        <div id="preview" class="preview">
+            <h3>前10行预览：</h3>
+            <pre id="previewContent"></pre>
+        </div>
+
+        <div id="stats" class="stats">
+            <span id="statsText"></span>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const uploadSection = document.getElementById('uploadSection');
+        const controls = document.getElementById('controls');
+        const processBtn = document.getElementById('processBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const preview = document.getElementById('preview');
+        const previewContent = document.getElementById('previewContent');
+        const stats = document.getElementById('stats');
+        const statsText = document.getElementById('statsText');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+
+        let originalLines = [];
+        let processedData = [];
+        let fileName = '';
+        const suffix = '&pid=1&uid=1&p1=1';
+        const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
+
+        uploadSection.addEventListener('click', () => fileInput.click());
+
+        uploadSection.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadSection.style.borderColor = '#4CAF50';
+        });
+
+        uploadSection.addEventListener('dragleave', () => {
+            uploadSection.style.borderColor = '#ccc';
+        });
+
+        uploadSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadSection.style.borderColor = '#ccc';
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.txt')) {
+                alert('请上传 .txt 格式的文件');
+                return;
+            }
+
+            fileName = file.name;
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+                const content = e.target.result;
+                originalLines = content.split('\n').map(line => line.replace(/\r$/, '').trim()).filter(line => line !== '');
+
+                const previewLines = originalLines.slice(0, 10).join('\n');
+                previewContent.textContent = previewLines || '(空文件)';
+                preview.style.display = 'block';
+
+                controls.classList.remove('hidden');
+                processBtn.disabled = false;
+                downloadBtn.disabled = true;
+                stats.style.display = 'none';
+            };
+
+            reader.readAsText(file);
+        }
+
+        processBtn.addEventListener('click', async () => {
+            processBtn.disabled = true;
+            downloadBtn.disabled = true;
+            progressContainer.style.display = 'block';
+            stats.style.display = 'none';
+
+            const totalLines = originalLines.length;
+            let totalUrls = 0;
+
+            processedData = [];
+
+            if (totalLines === 0 || (totalLines === 1 && !originalLines[0].toLowerCase().startsWith('url'))) {
+                processedData.push(['url']);
+            }
+
+            const batchSize = 500;
+            const totalBatches = Math.ceil(totalLines / batchSize);
+
+            for (let batch = 0; batch < totalBatches; batch++) {
+                const start = batch * batchSize;
+                const end = Math.min(start + batchSize, totalLines);
+                const batchLines = originalLines.slice(start, end);
+
+                const batchProcessed = batchLines.map((line, idx) => {
+                    const globalIdx = start + idx;
+                    const localUrlCount = (line.match(urlRegex) || []).length;
+                    let modifiedLine = line;
+
+                    if (localUrlCount > 0) {
+                        totalUrls += localUrlCount;
+                        modifiedLine = line.replace(urlRegex, (url) => {
+                            if (url.includes('?')) {
+                                return url + suffix;
+                            } else {
+                                return url + '?' + suffix.substring(1);
+                            }
+                        });
+                    }
+
+                    return [modifiedLine];
+                });
+
+                processedData.push(...batchProcessed);
+
+                const progress = Math.round(((batch + 1) / totalBatches) * 100);
+                progressFill.style.width = progress + '%';
+                progressFill.textContent = progress + '%';
+                progressText.textContent = `正在处理... ${end}/${totalLines} 行`;
+
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+
+            if (originalLines.length > 0 && !originalLines[0].toLowerCase().startsWith('url')) {
+                processedData.unshift(['url']);
+            }
+
+            progressFill.style.width = '100%';
+            progressFill.textContent = '100%';
+            progressText.textContent = '处理完成！';
+
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                stats.style.display = 'block';
+                statsText.textContent = `✅ 处理完成！共 ${totalLines} 行，找到 ${totalUrls} 个链接，已添加后缀 &pid=1&uid=1&p1=1`;
+                processBtn.disabled = false;
+                downloadBtn.disabled = false;
+            }, 500);
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            const ws = XLSX.utils.aoa_to_sheet(processedData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Links');
+
+            const baseName = fileName.replace('.txt', '');
+            XLSX.writeFile(wb, baseName + '_processed.xlsx');
+        });
+    </script>
+</body>
+</html>
