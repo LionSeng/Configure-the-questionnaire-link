@@ -65,6 +65,36 @@
             border-radius: 4px;
         }
 
+        .template-section {
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .template-section.show {
+            display: block;
+        }
+
+        .template-section label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .template-section input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .template-section .hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+
         .upload-section {
             border: 2px dashed #ccc;
             border-radius: 8px;
@@ -190,10 +220,17 @@
             <select id="customer">
                 <option value="yingdezhi">英德知</option>
                 <option value="ipsos">益普索</option>
+                <option value="yicha">易察</option>
             </select>
             <div class="customer-desc" id="customerDesc">
                 英德知：上传 txt 文件，添加后缀 &pid=1&uid=1&p1=1，输出 Excel
             </div>
+        </div>
+
+        <div class="template-section" id="templateSection">
+            <label for="linkTemplate">输入链接模板：</label>
+            <input type="text" id="linkTemplate" placeholder="https://v2.yisurvey.com/gen/html_custom_265/index_v1.html?pid=survey.taidu8.com&gid=xxx&data100ID=xxx&prid=xxx">
+            <div class="hint">将模板中的 <strong>gid=xxx</strong> 替换为文档中的 Id</div>
         </div>
 
         <div class="upload-section" id="uploadSection">
@@ -232,6 +269,8 @@
         const uploadLabel = document.getElementById('uploadLabel');
         const customerSelect = document.getElementById('customer');
         const customerDesc = document.getElementById('customerDesc');
+        const templateSection = document.getElementById('templateSection');
+        const linkTemplate = document.getElementById('linkTemplate');
         const controls = document.getElementById('controls');
         const processBtn = document.getElementById('processBtn');
         const downloadBtn = document.getElementById('downloadBtn');
@@ -245,6 +284,7 @@
 
         let originalLines = [];
         let originalExcelData = [];
+        let guidList = [];
         let processedData = [];
         let fileName = '';
         let currentCustomer = 'yingdezhi';
@@ -253,20 +293,24 @@
 
         const customerDescs = {
             'yingdezhi': '英德知：上传 txt 文件，每行一个链接，自动添加后缀 &pid=1&uid=1&p1=1，输出 Excel',
-            'ipsos': '益普索：上传 Excel 文件，提取 link 列并重命名为 url'
+            'ipsos': '益普索：上传 Excel 文件，提取 link 列并重命名为 url',
+            'yicha': '易察：输入链接模板，上传包含 GUID 的 Excel/CSV 文件，生成新链接'
         };
 
         customerSelect.addEventListener('change', (e) => {
             currentCustomer = e.target.value;
             customerDesc.textContent = customerDescs[currentCustomer];
             resetUI();
+            updateUploadUI();
         });
 
         function resetUI() {
             originalLines = [];
             originalExcelData = [];
+            guidList = [];
             processedData = [];
             fileName = '';
+            linkTemplate.value = '';
             preview.style.display = 'none';
             controls.classList.add('hidden');
             stats.style.display = 'none';
@@ -274,17 +318,19 @@
         }
 
         function updateUploadUI() {
+            templateSection.classList.remove('show');
             if (currentCustomer === 'yingdezhi') {
                 fileInput.accept = '.txt';
                 uploadLabel.innerHTML = '<p>📁 点击或拖拽文件到此处上传</p><p style="font-size: 12px; color: #999; margin-top: 10px;">支持 .txt 格式，每行一个链接</p>';
-            } else {
+            } else if (currentCustomer === 'ipsos') {
                 fileInput.accept = '.xlsx,.xls';
                 uploadLabel.innerHTML = '<p>📁 点击或拖拽文件到此处上传</p><p style="font-size: 12px; color: #999; margin-top: 10px;">支持 .xlsx / .xls 格式</p>';
+            } else if (currentCustomer === 'yicha') {
+                fileInput.accept = '.xlsx,.xls,.csv';
+                uploadLabel.innerHTML = '<p>📁 点击或拖拽文件到此处上传</p><p style="font-size: 12px; color: #999; margin-top: 10px;">上传包含 GUID 的 Excel 或 CSV 文件</p>';
+                templateSection.classList.add('show');
             }
         }
-
-        customerSelect.addEventListener('change', updateUploadUI);
-        updateUploadUI();
 
         uploadSection.addEventListener('click', () => fileInput.click());
 
@@ -321,12 +367,18 @@
                     return;
                 }
                 handleYingdezhiFile(file);
-            } else {
+            } else if (currentCustomer === 'ipsos') {
                 if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
                     alert('益普索客户请上传 Excel 格式的文件');
                     return;
                 }
                 handleIpsosFile(file);
+            } else if (currentCustomer === 'yicha') {
+                if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls') && !file.name.endsWith('.csv')) {
+                    alert('易察客户请上传 Excel 或 CSV 格式的文件');
+                    return;
+                }
+                handleYichaFile(file);
             }
         }
 
@@ -393,6 +445,56 @@
             reader.readAsArrayBuffer(file);
         }
 
+        function handleYichaFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const isCSV = file.name.endsWith('.csv');
+                    let jsonData;
+
+                    if (isCSV) {
+                        const text = new TextDecoder().decode(data);
+                        jsonData = text.split('\n').map(line => {
+                            const values = line.split(',');
+                            return values.map(v => v.replace(/\r$/, '').trim());
+                        }).filter(row => row.length > 0 && row[0]);
+                    } else {
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                    }
+
+                    if (jsonData.length === 0) {
+                        alert('文件为空');
+                        return;
+                    }
+
+                    originalExcelData = jsonData;
+
+                    const firstColumn = jsonData.map(row => row[0]).filter(val => val);
+                    if (firstColumn.length === 0) {
+                        alert('文件第一列为空，请检查文件格式');
+                        return;
+                    }
+
+                    guidList = firstColumn;
+
+                    const previewRows = guidList.slice(0, 10);
+                    previewContent.textContent = previewRows.join('\n');
+                    preview.style.display = 'block';
+
+                    controls.classList.remove('hidden');
+                    processBtn.disabled = false;
+                    downloadBtn.disabled = true;
+                    stats.style.display = 'none';
+                } catch (err) {
+                    alert('读取文件失败：' + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
         processBtn.addEventListener('click', async () => {
             processBtn.disabled = true;
             downloadBtn.disabled = true;
@@ -401,8 +503,10 @@
 
             if (currentCustomer === 'yingdezhi') {
                 await processYingdezhi();
-            } else {
+            } else if (currentCustomer === 'ipsos') {
                 await processIpsos();
+            } else if (currentCustomer === 'yicha') {
+                await processYicha();
             }
 
             progressContainer.style.display = 'none';
@@ -516,7 +620,77 @@
             stats.style.display = 'block';
         }
 
+        async function processYicha() {
+            const template = linkTemplate.value.trim();
+            if (!template) {
+                alert('请输入链接模板');
+                progressContainer.style.display = 'none';
+                processBtn.disabled = false;
+                return;
+            }
+
+            if (!template.includes('gid=xxx')) {
+                alert('链接模板中必须包含 gid=xxx 作为占位符');
+                progressContainer.style.display = 'none';
+                processBtn.disabled = false;
+                return;
+            }
+
+            const totalIds = guidList.length;
+            processedData = [];
+            processedData.push(['url']);
+
+            const batchSize = 500;
+            const totalBatches = Math.ceil(totalIds / batchSize);
+
+            for (let batch = 0; batch < totalBatches; batch++) {
+                const start = batch * batchSize;
+                const end = Math.min(start + batchSize, totalIds);
+                const batchIds = guidList.slice(start, end);
+
+                const batchProcessed = batchIds.map((id) => {
+                    const newUrl = template.replace(/gid=xxx/g, 'gid=' + id.toString().trim());
+                    return [newUrl];
+                });
+
+                processedData.push(...batchProcessed);
+
+                const progress = Math.round(((batch + 1) / totalBatches) * 100);
+                progressFill.style.width = progress + '%';
+                progressFill.textContent = progress + '%';
+                progressText.textContent = `正在处理... ${end}/${totalIds} 个链接`;
+
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+
+            progressFill.style.width = '100%';
+            progressFill.textContent = '100%';
+            progressText.textContent = '处理完成！';
+
+            statsText.textContent = `✅ 易察处理完成！共生成 ${totalIds} 个链接，将分2个文件导出（Part1: 3万个，Part2: 剩余）`;
+            stats.style.display = 'block';
+        }
+
         downloadBtn.addEventListener('click', () => {
+            if (currentCustomer === 'yicha') {
+                const part1 = processedData.slice(0, 30001);
+                const part2 = processedData.slice(30001);
+
+                const ws1 = XLSX.utils.aoa_to_sheet(part1);
+                const wb1 = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb1, ws1, 'Links');
+                let baseName = fileName.replace(/\.(xlsx|xls|csv)$/i, '');
+                XLSX.writeFile(wb1, baseName + '_urls_part1.xlsx');
+
+                if (part2.length > 1) {
+                    const ws2 = XLSX.utils.aoa_to_sheet(part2);
+                    const wb2 = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb2, ws2, 'Links');
+                    XLSX.writeFile(wb2, baseName + '_urls_part2.xlsx');
+                }
+                return;
+            }
+
             const ws = XLSX.utils.aoa_to_sheet(processedData);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Links');
@@ -524,7 +698,7 @@
             let downloadName;
             if (currentCustomer === 'yingdezhi') {
                 downloadName = fileName.replace('.txt', '') + '_processed.xlsx';
-            } else {
+            } else if (currentCustomer === 'ipsos') {
                 downloadName = fileName.replace(/\.(xlsx|xls)$/i, '') + '_processed.xlsx';
             }
 
